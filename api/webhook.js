@@ -90,14 +90,29 @@ async function searchDocuments(embedding) {
 }
 
 async function generateAnswer(question, contexts) {
-  if (!contexts || contexts.length === 0)
-    return '我在知识库中没有找到相关内容，请尝试换个问法。';
-  const contextText = contexts.map(c => `【来源：${c.file_path}】\n${c.content}`).join('\n\n---\n\n');
-  const prompt = `你是吹雨的个人知识库助手。\n\n知识库内容：\n${contextText}\n\n请根据以上内容回答问题，用中文简洁作答，注明来源。\n\n问题：${question}`;
+  let prompt;
+  if (contexts && contexts.length > 0) {
+    const contextText = contexts.map(c => `【来源：${c.file_path}】\n${c.content}`).join('\n\n---\n\n');
+    prompt = `你是吹雨的个人AI助手，既能查询他的知识库，也能像普通聊天机器人一样回答各种问题。
+
+以下是从知识库中检索到的相关内容，如果和问题相关就优先参考，并注明来源；如果不相关就忽略，直接用自己的知识回答。
+
+知识库内容：
+${contextText}
+
+---
+用中文回答，语气自然友好。
+
+问题：${question}`;
+  } else {
+    prompt = `你是吹雨的个人AI助手，像一个聪明、友好的朋友一样回答各种问题。用中文回答，语气自然。
+
+问题：${question}`;
+  }
   const res = await fetch('https://api.siliconflow.cn/v1/chat/completions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${SILICONFLOW_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: 'deepseek-ai/DeepSeek-V3', messages: [{ role: 'user', content: prompt }], max_tokens: 1024, temperature: 0.3 })
+    body: JSON.stringify({ model: 'deepseek-ai/DeepSeek-V3', messages: [{ role: 'user', content: prompt }], max_tokens: 1024, temperature: 0.7 })
   });
   const data = await res.json();
   return data.choices[0].message.content;
