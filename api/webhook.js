@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { waitUntil } from '@vercel/functions';
 
 const CORP_ID     = process.env.WXWORK_CORP_ID;
 const AGENT_ID    = process.env.WXWORK_AGENT_ID;
@@ -126,14 +127,16 @@ export default async function handler(req, res) {
     const userId  = getXmlValue(xmlStr, 'FromUserName');
     const content = getXmlValue(xmlStr, 'Content').trim();
 
-    // 先返回200，再异步处理
-    res.status(200).send('success');
-
     if (msgType === 'text' && userId && content) {
-      rag(content)
-        .then(answer => sendMessage(userId, answer))
-        .catch(err => sendMessage(userId, `处理出错：${err.message}`));
+      // waitUntil 保证响应返回后函数继续运行
+      waitUntil(
+        rag(content)
+          .then(answer => sendMessage(userId, answer))
+          .catch(err => sendMessage(userId, `处理出错：${err.message}`))
+      );
     }
+
+    res.status(200).send('success');
     return;
   }
 
