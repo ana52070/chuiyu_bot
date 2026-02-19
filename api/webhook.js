@@ -49,11 +49,12 @@ async function getAccessToken() {
 
 async function sendMessage(toUser, content) {
   const token = await getAccessToken();
-  await fetch(`https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token=${token}`, {
+  const res = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token=${token}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ touser: toUser, msgtype: 'text', agentid: parseInt(AGENT_ID), text: { content } })
   });
+  return res.json();
 }
 
 async function getEmbedding(text) {
@@ -90,12 +91,9 @@ async function generateAnswer(question, contexts) {
 }
 
 async function rag(question) {
-  console.log("[RAG] 开始处理:", question);
   const embedding = await getEmbedding(question);
   const contexts  = await searchDocuments(embedding);
-  const answer = await generateAnswer(question, contexts);
-  console.log("[RAG] 生成完成，长度:", answer?.length);
-  return answer;
+  return generateAnswer(question, contexts);
 }
 
 export default async function handler(req, res) {
@@ -131,13 +129,18 @@ export default async function handler(req, res) {
     const content = getXmlValue(xmlStr, 'Content').trim();
 
     if (msgType === 'text' && userId && content) {
-      // waitUntil 保证响应返回后函数继续运行
       waitUntil(
-        rag(content)
-          .then(answer => {console.log('[SEND] 开始推送消息,toUser:', userId); return sendMessage(userId, answer); })
-          
-          .then(() => console.log('[SEND] 推送成功'))
-          .catch(err => { console.error('[ERROR]', err.message, err.stack); return sendMessage(userId, `处理出错：${err.message}`); })
+        (async () => {
+          // 先发确认消息
+          await sendMessage(userId, '等我仔细想想哈......别着急马上好');
+          // 再执行 RAG 并发送结果
+          try {
+            const answer = await rag(content);
+            await sendMessage(userId, answer);
+          } catch (err) {
+            await sendMessage(userId, `处理出错：${err.message}`);
+          }
+        })()
       );
     }
 
