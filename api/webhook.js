@@ -41,20 +41,24 @@ function getRawBody(req) {
   });
 }
 
+// 获取一次 token，复用于多次发消息
 async function getAccessToken() {
   const res = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=${CORP_ID}&corpsecret=${CORP_SECRET}`);
   const data = await res.json();
+  console.log('[TOKEN] errcode:', data.errcode, 'token_prefix:', data.access_token?.slice(0, 10));
   return data.access_token;
 }
 
-async function sendMessage(toUser, content) {
-  const token = await getAccessToken();
+async function sendMessageWithToken(token, toUser, content) {
+  console.log('[SEND] 发送消息，长度:', content.length);
   const res = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token=${token}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ touser: toUser, msgtype: 'text', agentid: parseInt(AGENT_ID), text: { content } })
   });
-  return res.json();
+  const result = await res.json();
+  console.log('[SEND] 企业微信返回:', JSON.stringify(result));
+  return result;
 }
 
 async function getEmbedding(text) {
@@ -90,12 +94,6 @@ async function generateAnswer(question, contexts) {
   return data.choices[0].message.content;
 }
 
-async function rag(question) {
-  const embedding = await getEmbedding(question);
-  const contexts  = await searchDocuments(embedding);
-  return generateAnswer(question, contexts);
-}
-
 export default async function handler(req, res) {
   const urlObj = new URL(req.url, `https://${req.headers.host}`);
   const p = urlObj.searchParams;
@@ -128,18 +126,34 @@ export default async function handler(req, res) {
     const userId  = getXmlValue(xmlStr, 'FromUserName');
     const content = getXmlValue(xmlStr, 'Content').trim();
 
+    console.log('[MSG] userId:', userId, 'content:', content);
+
     if (msgType === 'text' && userId && content) {
       waitUntil(
         (async () => {
-          // 先发确认消息
-          await sendMessage(userId, '等我仔细想想哈......别着急马上好');
-          // 再执行 RAG 并发送结果
+          // 只获取一次 token，两条消息复用
+          const token = await getAccessToken();
+
+          // 第一条：立即确认
+          await sendMessageWithToken(token, userId, '🔍 正在知识库中检索，请稍候...');
+
+          // RAG
+          let answer;
           try {
-            const answer = await rag(content);
-            await sendMessage(userId, answer);
+            console.log('[RAG] 开始');
+            const embedding = await getEmbedding(content);
+            console.log('[RAG] embedding完成');
+            const contexts = await searchDocuments(embedding);
+            console.log('[RAG] 检索完成，文档数:', contexts?.length);
+            answer = await generateAnswer(content, contexts);
+            console.log('[RAG] 生成完成，长度:', answer?.length);
           } catch (err) {
-            await sendMessage(userId, `处理出错：${err.message}`);
+            console.error('[RAG ERROR]', err.message);
+            answer = `处理出错：${err.message}`;
           }
+
+          // 第二条：发 RAG 结果，复用同一个 token
+          await sendMessageWithToken(token, userId, answer);
         })()
       );
     }
