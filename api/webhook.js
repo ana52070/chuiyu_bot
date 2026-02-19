@@ -51,10 +51,14 @@ async function getAccessToken() {
 
 async function sendMessageWithToken(token, toUser, content) {
   console.log('[SEND] 发送消息，长度:', content.length);
-  const res = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token=${token}`, {
+  const WORKER_URL = "https://rapid-brook-d2f5.2686367411.workers.dev";
+  const res = await fetch(WORKER_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ touser: toUser, msgtype: 'text', agentid: parseInt(AGENT_ID), text: { content } })
+    body: JSON.stringify({
+      access_token: token,
+      payload: { touser: toUser, msgtype: 'text', agentid: parseInt(AGENT_ID), text: { content } }
+    })
   });
   const result = await res.json();
   console.log('[SEND] 企业微信返回:', JSON.stringify(result));
@@ -135,7 +139,7 @@ export default async function handler(req, res) {
           const token = await getAccessToken();
 
           // 第一条：立即确认
-          await sendMessageWithToken(token, userId, '🔍 正在知识库中检索，请稍候...');
+          await sendMessageWithToken(token, userId, '等我好好想想哈,别着急马上好');
 
           // RAG
           let answer;
