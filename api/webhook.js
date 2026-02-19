@@ -90,9 +90,12 @@ async function generateAnswer(question, contexts) {
 }
 
 async function rag(question) {
+  console.log("[RAG] 开始处理:", question);
   const embedding = await getEmbedding(question);
   const contexts  = await searchDocuments(embedding);
-  return generateAnswer(question, contexts);
+  const answer = await generateAnswer(question, contexts);
+  console.log("[RAG] 生成完成，长度:", answer?.length);
+  return answer;
 }
 
 export default async function handler(req, res) {
@@ -131,8 +134,9 @@ export default async function handler(req, res) {
       // waitUntil 保证响应返回后函数继续运行
       waitUntil(
         rag(content)
-          .then(answer => sendMessage(userId, answer))
-          .catch(err => sendMessage(userId, `处理出错：${err.message}`))
+          .then(answer => { console.log('[SEND] 开始推送消息'); return sendMessage(userId, answer); })
+          .then(() => console.log('[SEND] 推送成功'))
+          .catch(err => { console.error('[ERROR]', err.message, err.stack); return sendMessage(userId, `处理出错：${err.message}`); })
       );
     }
 
