@@ -1,11 +1,12 @@
 """
-webhook.py - Vercel Serverless Function
-企业微信消息回调，使用被动回复 XML 模式
+webhook.py - 异步处理版本
+收到消息立即返回200，后台线程处理RAG并主动推送结果
 """
 
 import os
 import sys
 import time
+import threading
 import xml.etree.ElementTree as ET
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
@@ -23,17 +24,35 @@ WX_AES_KEY  = os.environ.get("WXWORK_AES_KEY", "")
 crypt = WXBizMsgCrypt(WX_TOKEN, WX_AES_KEY, CORP_ID)
 
 
-def make_text_reply(to_user: str, from_user: str, content: str) -> str:
-    """构造被动回复的明文 XML"""
-    return (
-        f"<xml>"
-        f"<ToUserName><![CDATA[{to_user}]]></ToUserName>"
-        f"<FromUserName><![CDATA[{from_user}]]></FromUserName>"
-        f"<CreateTime>{int(time.time())}</CreateTime>"
-        f"<MsgType><![CDATA[text]]></MsgType>"
-        f"<Content><![CDATA[{content}]]></Content>"
-        f"</xml>"
-    )
+def get_access_token() -> str:
+    import requests
+    url = f"https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid={CORP_ID}&corpsecret={CORP_SECRET}"
+    resp = requests.get(url, timeout=10)
+    return resp.json().get("access_token", "")
+
+
+def send_message(to_user: str, content: str):
+    import requests
+    token = get_access_token()
+    if not token:
+        return
+    url = f"https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token={token}"
+    payload = {
+        "touser": to_user,
+        "msgtype": "text",
+        "agentid": int(AGENT_ID),
+        "text": {"content": content},
+    }
+    requests.post(url, json=payload, timeout=30)
+
+
+def process_and_reply(user_id: str, question: str):
+    """后台线程：执行RAG查询并主动推送结果"""
+    try:
+        answer = rag_query(question)
+        send_message(user_id, answer)
+    except Exception as e:
+        send_message(user_id, f"处理出错：{str(e)}")
 
 
 def parse_xml(xml_str: str) -> dict:
@@ -80,28 +99,22 @@ class handler(BaseHTTPRequestHandler):
         msg     = parse_xml(xml_str)
 
         if msg.get("MsgType") == "text":
-            user_id    = msg.get("FromUserName", "")
-            to_user    = msg.get("ToUserName", "")
-            question   = msg.get("Content", "").strip()
+            user_id  = msg.get("FromUserName", "")
+            question = msg.get("Content", "").strip()
 
-            # RAG 查询
-            answer = rag_query(question)
+            # 立即返回200，避免微信超时重试
+            self._respond(200, "success")
 
-            # 构造加密被动回复
-            reply_xml  = make_text_reply(user_id, to_user, answer)
-            encrypted_reply = crypt.encrypt(reply_xml)
-            response_xml    = crypt.make_reply_xml(
-                encrypted_reply,
-                str(int(time.time())),
-                nonce
-            )
-            self._respond(200, response_xml, content_type="application/xml")
+            # 后台线程处理RAG并推送结果
+            t = threading.Thread(target=process_and_reply, args=(user_id, question))
+            t.daemon = True
+            t.start()
         else:
             self._respond(200, "success")
 
-    def _respond(self, code: int, body: str, content_type: str = "text/plain"):
+    def _respond(self, code: int, body: str):
         self.send_response(code)
-        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Type", "text/plain")
         self.end_headers()
         self.wfile.write(body.encode("utf-8"))
 
