@@ -11,6 +11,9 @@ const SUPABASE_URL    = process.env.SUPABASE_URL;
 const SUPABASE_KEY    = process.env.SUPABASE_KEY;
 const SILICONFLOW_KEY = process.env.SILICONFLOW_KEY;
 
+// VPS nginx 代理地址，所有发往企业微信的请求都走这里
+const VPS_PROXY = 'http://49.233.85.74:8080';
+
 function verifySignature(signature, timestamp, nonce, data = '') {
   const str = [WX_TOKEN, timestamp, nonce, data].sort().join('');
   return crypto.createHash('sha1').update(str).digest('hex') === signature;
@@ -41,9 +44,9 @@ function getRawBody(req) {
   });
 }
 
-// 获取一次 token，复用于多次发消息
 async function getAccessToken() {
-  const res = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=${CORP_ID}&corpsecret=${CORP_SECRET}`);
+  // gettoken 也走 VPS 代理，确保 IP 一致
+  const res = await fetch(`${VPS_PROXY}/cgi-bin/gettoken?corpid=${CORP_ID}&corpsecret=${CORP_SECRET}`);
   const data = await res.json();
   console.log('[TOKEN] errcode:', data.errcode, 'token_prefix:', data.access_token?.slice(0, 10));
   return data.access_token;
@@ -51,13 +54,15 @@ async function getAccessToken() {
 
 async function sendMessageWithToken(token, toUser, content) {
   console.log('[SEND] 发送消息，长度:', content.length);
-  const WORKER_URL = "http://49.233.85.74:8080";
-  const res = await fetch(WORKER_URL, {
+  // 直接调企业微信 API 格式，走 VPS nginx 代理出去
+  const res = await fetch(`${VPS_PROXY}/cgi-bin/message/send?access_token=${token}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      access_token: token,
-      payload: { touser: toUser, msgtype: 'text', agentid: parseInt(AGENT_ID), text: { content } }
+      touser: toUser,
+      msgtype: 'text',
+      agentid: parseInt(AGENT_ID),
+      text: { content }
     })
   });
   const result = await res.json();
@@ -135,11 +140,10 @@ export default async function handler(req, res) {
     if (msgType === 'text' && userId && content) {
       waitUntil(
         (async () => {
-          // 只获取一次 token，两条消息复用
           const token = await getAccessToken();
 
           // 第一条：立即确认
-          await sendMessageWithToken(token, userId, '等我好好想想哈,别着急马上好');
+          await sendMessageWithToken(token, userId, '等我好好想想哈，别着急马上好');
 
           // RAG
           let answer;
@@ -156,7 +160,7 @@ export default async function handler(req, res) {
             answer = `处理出错：${err.message}`;
           }
 
-          // 第二条：发 RAG 结果，复用同一个 token
+          // 第二条：发 RAG 结果
           await sendMessageWithToken(token, userId, answer);
         })()
       );
