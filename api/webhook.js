@@ -134,7 +134,8 @@ export default async function handler(req, res) {
       // waitUntil 保证响应返回后函数继续运行
       waitUntil(
         rag(content)
-          .then(answer => { console.log('[SEND] 开始推送消息'); return sendMessage(userId, answer); })
+          .then(answer => {console.log('[SEND] 开始推送消息,toUser:', userId); return sendMessage(userId, answer); })
+          
           .then(() => console.log('[SEND] 推送成功'))
           .catch(err => { console.error('[ERROR]', err.message, err.stack); return sendMessage(userId, `处理出错：${err.message}`); })
       );
