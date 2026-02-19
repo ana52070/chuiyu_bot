@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "type": "module",
   "dependencies": {
-    "axios": "^1.6.0",
-    "xml2js": "^0.6.2"
+    "@vercel/functions": "^1.0.0"
   }
 }
