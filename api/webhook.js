@@ -44,21 +44,16 @@ function getRawBody(req) {
 async function getAccessToken() {
   const res = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=${CORP_ID}&corpsecret=${CORP_SECRET}`);
   const data = await res.json();
-  console.log('[TOKEN]', JSON.stringify(data));
   return data.access_token;
 }
 
 async function sendMessage(toUser, content) {
   const token = await getAccessToken();
-  const body = { touser: toUser, msgtype: 'text', agentid: parseInt(AGENT_ID), text: { content } };
-  console.log('[SEND] 请求体:', JSON.stringify(body));
-  const res = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token=${token}`, {
+  await fetch(`https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token=${token}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
+    body: JSON.stringify({ touser: toUser, msgtype: 'text', agentid: parseInt(AGENT_ID), text: { content } })
   });
-  const result = await res.json();
-  console.log('[SEND] 企业微信返回:', JSON.stringify(result));
 }
 
 async function getEmbedding(text) {
@@ -95,9 +90,12 @@ async function generateAnswer(question, contexts) {
 }
 
 async function rag(question) {
+  console.log("[RAG] 开始处理:", question);
   const embedding = await getEmbedding(question);
   const contexts  = await searchDocuments(embedding);
-  return generateAnswer(question, contexts);
+  const answer = await generateAnswer(question, contexts);
+  console.log("[RAG] 生成完成，长度:", answer?.length);
+  return answer;
 }
 
 export default async function handler(req, res) {
@@ -132,14 +130,14 @@ export default async function handler(req, res) {
     const userId  = getXmlValue(xmlStr, 'FromUserName');
     const content = getXmlValue(xmlStr, 'Content').trim();
 
-    console.log('[MSG] msgType:', msgType, 'userId:', userId, 'content:', content);
-
     if (msgType === 'text' && userId && content) {
-      // 先发固定消息测试推送链路
+      // waitUntil 保证响应返回后函数继续运行
       waitUntil(
-        sendMessage(userId, '收到！')
-          .then(() => console.log('[SEND] 固定消息推送完成'))
-          .catch(err => console.error('[SEND ERROR]', err.message))
+        rag(content)
+          .then(answer => {console.log('[SEND] 开始推送消息,toUser:', userId); return sendMessage(userId, answer); })
+          
+          .then(() => console.log('[SEND] 推送成功'))
+          .catch(err => { console.error('[ERROR]', err.message, err.stack); return sendMessage(userId, `处理出错：${err.message}`); })
       );
     }
 
