@@ -51,7 +51,7 @@ async function getAccessToken() {
 
 async function sendMessageWithToken(token, toUser, content) {
   console.log('[SEND] 发送消息，长度:', content.length);
-  const WORKER_URL = "https://rapid-brook-d2f5.2686367411.workers.dev";
+  const WORKER_URL = "http://49.233.85.74:8080";
   const res = await fetch(WORKER_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
